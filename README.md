@@ -48,74 +48,63 @@ profiles from the July session are created automatically.
 
 ## Deploying to Hostinger from GitHub
 
-The one thing that matters: **`DB_PATH` must point outside `public_html`.**
-
-Your SQLite file would otherwise sit inside the folder git deploys into, where
-a clean checkout can delete it and only `.htaccess` keeps it private. Moved one
-level up, it has no URL at all and no deployment can touch it. Same database,
-same simplicity — just kept somewhere git and the web server can't reach.
+Everything stays in one folder — the database included. No extra folder to
+create, nothing outside `public_html`.
 
 1. **Push the repo.** `.env`, `data/*.sqlite*`, `data/secret.key` and
-   `data/.installed` are git-ignored. `data/.htaccess` **is** tracked and must
-   stay that way.
+   `data/.installed` are git-ignored, so they never leave your machine.
+   `data/.htaccess` **is** tracked and must stay that way — it's what blocks
+   the database from the web.
 
 2. **hPanel → Advanced → Git.** Connect the repo, branch `main`, install path
-   `public_html`. Deploy.
+   `public_html`. Deploy. (Hostinger's Git deploy runs a `pull`, not a clean
+   wipe, so it never touches files that aren't tracked in the repo — like
+   `data/spine.sqlite` once setup.php creates it.)
 
 3. **hPanel → PHP Configuration.** PHP 8.1 or newer. Confirm `pdo_sqlite` is on
    — it is by default on Hostinger.
 
-4. **Make the data folder**, next to `public_html`, not inside it. In File
-   Manager go up one level from `public_html` and create `spine-data`. Over SSH:
-
-   ```bash
-   mkdir -p ~/spine-data && chmod 755 ~/spine-data
-   ```
-
-5. **Create `.env` in `public_html`** (File Manager → New File). Use your real
-   home path — hPanel shows it, it looks like `/home/u123456789`:
+4. **Create `.env` in `public_html`** (File Manager → New File):
 
    ```ini
    APP_NAME="Spine"
-   DB_DRIVER=sqlite
-   DB_PATH=/home/u123456789/spine-data/spine.sqlite
    APP_SECRET=paste_64_random_hex_characters_here
    ```
 
-   Generate the secret with `php -r "echo bin2hex(random_bytes(32));"`, or any
-   long random string. Setting it here means a deploy that replaces the whole
-   folder cannot sign everyone out.
+   `DB_DRIVER` and `DB_PATH` can be left out entirely — SQLite in `data/` is
+   already the default. Generate the secret with
+   `php -r "echo bin2hex(random_bytes(32));"`. Setting it here (rather than
+   letting PHP generate one) means a future redeploy can't sign everyone out.
 
-6. **`chmod 775 public_html/data`** — only needed if you skipped `APP_SECRET`
-   above, in which case PHP has to write `data/secret.key` itself.
+5. **`chmod 775 public_html/data`** so PHP can create the database file and
+   the secret key.
 
-7. Open `https://yourdomain.com/setup.php`, set your admin password, copy the
-   links. The page confirms which database file it is using — check it says your
-   `spine-data` path.
+6. Open `https://yourdomain.com/setup.php`, set your admin password, copy the
+   links.
 
-8. **Delete `setup.php` from the repository** and push. Deleting it only on the
-   server does nothing; the next deploy restores it.
+7. **Delete `setup.php` from the repository** and push. Deleting it only on
+   the server does nothing; the next deploy restores it.
 
-9. Open `/admin.php` and read the banners at the top. You want a green
-   *"Database is stored outside the web root"* and **no red ones**. That is a
-   live check from your browser, not a guess.
+8. Open `/admin.php` and read the banner at the top. You want **no red
+   warning** about the database being downloadable — that's a live check from
+   your own browser, not a guess. If it's red, your host is ignoring
+   `.htaccess` and that needs fixing before you send anyone a link.
 
 ### Redeploying later
 
-Your database is outside the deploy folder and `.env` is not in git, so pushing
-new code cannot touch either. `lib/seed.php` only ever runs during setup, so
-nothing is re-seeded.
+`.env` and the database are both git-ignored, so pushing new code never
+touches either. `lib/seed.php` only ever runs during setup, so nothing gets
+re-seeded.
 
 ### Backups
 
-Nothing backs up a SQLite file automatically. It is one file, so it is easy:
+Nothing backs up a SQLite file automatically. It's one file, so it's easy —
+grab it over SFTP or File Manager occasionally, or on a schedule if you have
+shell access:
 
 ```bash
-cp ~/spine-data/spine.sqlite ~/backups/spine-$(date +%F).sqlite
+cp public_html/data/spine.sqlite ~/backups/spine-$(date +%F).sqlite
 ```
-
-Worth doing before each deploy, and worth a weekly cron once people have put
-real things in there.
 
 ## Sending the links
 

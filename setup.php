@@ -98,25 +98,14 @@ if ($maySeeLinks && db_installed()) {
     </form>
   </div>
 
-  <?php
-    $inRoot = false;
-    $dbPath = cfg('db')['sqlite_path'];
-    if (db_driver() === 'sqlite') {
-        $dir    = realpath(dirname($dbPath));
-        $root   = realpath(__DIR__);
-        $inRoot = $dir && $root && strpos($dir . DIRECTORY_SEPARATOR, $root . DIRECTORY_SEPARATOR) === 0;
-    }
-  ?>
+  <?php $dbPath = cfg('db')['sqlite_path']; ?>
   <div class="card mt14">
     <div class="tiny faint">Driver <b style="color:var(--txt)"><?= e(db_driver()) ?></b><?php
       if (db_driver() === 'sqlite'): ?> · <code><?= e($dbPath) ?></code><?php endif; ?></div>
-    <?php if ($inRoot): ?>
-      <p class="tiny mt8" style="color:#ffcb8f">This database sits inside the web folder. Fine for
-        local work. If you deploy from git, set <code>DB_PATH</code> in <code>.env</code> to a
-        path outside it first — otherwise a redeploy can wipe it.</p>
-    <?php endif; ?>
     <p class="tiny faint mt8">Configure everything in <code>.env</code> (copy <code>.env.example</code>),
-       not in <code>lib/config.php</code>.</p>
+       not in <code>lib/config.php</code>. After deploying, open <code>/admin.php</code> and
+       check for a red warning about the database being downloadable — if you see one, this
+       host is ignoring <code>.htaccess</code>.</p>
   </div>
 
 <?php elseif (!$maySeeLinks): ?>

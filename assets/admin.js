@@ -64,9 +64,9 @@ async function securityCheck() {
           level: 'danger',
           t: 'Your database is downloadable',
           s: `Anyone can fetch ${D.probe} over the web and read every profile. This host `
-           + `is ignoring .htaccess — expected on PHP's built-in dev server, but it must be `
-           + `fixed on real hosting. The proper fix is DB_PATH in .env pointing outside the `
-           + `web root; see README.md.`,
+           + `is ignoring .htaccess. Expected on PHP's built-in dev server; on real hosting `
+           + `it must be fixed — check hPanel for an .htaccess / mod_rewrite setting, or `
+           + `contact support. See README.md.`,
         });
       }
     } catch { /* blocked, which is the good outcome */ }
@@ -85,15 +85,6 @@ async function securityCheck() {
         });
       }
     } catch { /* blocked, which is the good outcome */ }
-  }
-
-  if (D.driver === 'sqlite' && D.outside) {
-    warn.push({
-      level: 'good',
-      t: 'Database is stored outside the web root',
-      s: 'It has no URL at all, so it cannot be downloaded, and a git redeploy cannot '
-       + 'delete it. This is the safest setup.',
-    });
   }
 
   if (D.setup) {
