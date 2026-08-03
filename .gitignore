@@ -1,0 +1,7 @@
+# Server-only settings (database path, credentials). Never commit this.
+.env
+
+# Runtime data — recreated by setup.php, never copied between machines.
+data/*.sqlite*
+data/secret.key
+data/.installed

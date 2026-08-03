@@ -1,0 +1,23 @@
+# Spine
+Options -Indexes
+
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set Referrer-Policy "no-referrer"
+</IfModule>
+
+# Never serve dotfiles — .env above all.
+<FilesMatch "^\.">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# Belt and braces: the app code, the data folder and .env are never URLs.
+RedirectMatch 404 /(data|lib)/
+RedirectMatch 404 /\.env
