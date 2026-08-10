@@ -128,18 +128,67 @@ function app_secret(): string
     return $s = trim((string) file_get_contents($file));
 }
 
+/**
+ * Where this site lives.
+ *
+ * BASE_URL in .env wins. Otherwise it is worked out from the request — and
+ * remembered, because cron.php runs from the command line where there is no
+ * request to work it out from, and it sends emails full of links.
+ */
 function base_url(): string
 {
     $configured = trim((string) cfg('base_url'));
     if ($configured !== '') {
         return rtrim($configured, '/');
     }
+
+    if (PHP_SAPI === 'cli' || empty($_SERVER['HTTP_HOST'])) {
+        $remembered = function_exists('setting') ? (string) setting('base_url', '') : '';
+        return $remembered !== '' ? rtrim($remembered, '/') : 'http://localhost';
+    }
+
     $https  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
     $scheme = $https ? 'https' : 'http';
-    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $host   = $_SERVER['HTTP_HOST'];
     $dir    = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
-    return $scheme . '://' . $host . $dir;
+    $url    = $scheme . '://' . $host . $dir;
+
+    // Remember it for the CLI, but only write when it has actually changed.
+    static $stored = false;
+    if (!$stored) {
+        $stored = true;
+        try {
+            if (setting('base_url', '') !== $url) {
+                set_setting('base_url', $url);
+            }
+        } catch (Throwable $e) {
+            // database not ready yet — harmless
+        }
+    }
+    return $url;
+}
+
+/**
+ * The name someone is actually called. "Muhammad Saqib" is Saqib and
+ * "Hafiz Talha Jalal" is Talha — greeting them by an honorific reads as a
+ * mail merge, which is exactly what we are trying not to be.
+ */
+function first_name(string $name): string
+{
+    static $prefixes = ['muhammad', 'mohammad', 'mohammed', 'md', 'hafiz', 'hafiza', 'syed',
+        'sayyed', 'mian', 'malik', 'sheikh', 'shaikh', 'mirza', 'ch', 'chaudhry', 'chaudhary',
+        'raja', 'dr', 'dr.', 'prof', 'prof.', 'engr', 'mr', 'ms', 'mrs'];
+
+    $parts = array_values(array_filter(preg_split('/\s+/', trim($name)) ?: []));
+    if (!$parts) {
+        return '';
+    }
+    $i = 0;
+    while ($i < count($parts) - 1 && in_array(mb_strtolower($parts[$i]), $prefixes, true)) {
+        $i++;
+    }
+    return $parts[$i];
 }
 
 function now(): string

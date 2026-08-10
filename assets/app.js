@@ -113,6 +113,7 @@ const ICONS = {
   home:   '<path d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5"/>',
   people: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16.5 5.6a3 3 0 0 1 0 5.6M17.5 14.4c2.2.6 3.5 2.4 3.5 4.6"/>',
   proj:   '<rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7"/>',
+  round:  '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.6a2.5 2.5 0 1 1 3.2 3.3c-.5.3-.8.8-.8 1.4"/><path d="M12 17.2v.01"/>',
   spark:  '<path d="M13 2.5 4.5 13.5H11l-1 8L19.5 10H13z"/>',
 };
 
@@ -123,11 +124,13 @@ function nav(route) {
        stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg>${label}</a>`;
 
   $('#topnav').innerHTML = [
-    ['/', 'Home'], ['/people', 'People'], ['/projects', 'Projects'], ['/sparks', 'Sparks'],
+    ['/', 'Home'], ['/round', 'Round'], ['/people', 'People'],
+    ['/projects', 'Projects'], ['/sparks', 'Sparks'],
   ].map(([h, l]) => `<a href="#${h}" class="${route === h || (h !== '/' && route.startsWith(h)) ? 'on' : ''}">${l}</a>`).join('');
 
   $('#tabbar').innerHTML =
     tab('/', 'home', 'Home', '/') +
+    tab('/round', 'round', 'Round', '/round') +
     tab('/people', 'people', 'People', '/people') +
     tab('/projects', 'proj', 'Projects', '/projects') +
     tab('/sparks', 'spark', 'Sparks', '/sparks');
@@ -235,6 +238,7 @@ function viewHome() {
   const stat = (v, k) => `<div><div class="v">${v}</div><div class="k">${k}</div></div>`;
 
   return `<div class="view">
+    ${roundCard(S.round)}
     ${pairHtml}
     ${nextHtml}
     ${nudges}
@@ -286,6 +290,185 @@ function feedItem(f) {
     <div class="ic">${ic}</div>
     <div class="grow"><div class="txt">${txt}</div><div class="when">${ago(f.at)}</div></div>
   </div>`;
+}
+
+/* -------------------------------------------------------------- round */
+
+const KIND_LABEL = { question: 'Question', thought: 'Thought', idea: 'Idea' };
+
+function timeLeft(r) {
+  if (r.status !== 'active' || r.hours_left === null) return '';
+  if (r.hours_left <= 0) return 'closing now';
+  if (r.hours_left < 24) return `${r.hours_left}h left`;
+  const d = Math.ceil(r.hours_left / 24);
+  return `${d} ${d === 1 ? 'day' : 'days'} left`;
+}
+
+/** Compact card for the home screen. */
+function roundCard(r) {
+  if (!r) {
+    return `<a class="round empty-round" href="#/round">
+      <div class="tagline">The Round</div>
+      <p class="mt8" style="font-size:16px;font-weight:600">The floor is free</p>
+      <p class="small muted mt8">One question or thought at a time, and nobody has put one up.
+        Yours could be it.</p>
+      <span class="btn primary full mt14">Ask the circle something</span>
+    </a>`;
+  }
+
+  const pct = Math.min(100, Math.round((r.count / r.threshold) * 100));
+  return `<a class="round" href="#/round">
+    <div class="row gap10">
+      <span class="tagline grow">${esc(KIND_LABEL[r.kind] || 'Question')} on the floor</span>
+      <span class="faint tiny">${esc(timeLeft(r))}</span>
+    </div>
+    <p class="rq mt8">${esc(r.title)}</p>
+    <div class="row gap10 mt14">
+      ${r.author ? av(r.author, 'xs') : ''}
+      <span class="small faint grow">${r.author ? esc(firstName(r.author.name)) : ''} asked</span>
+    </div>
+    <div class="meter mt14"><div class="bar"><i style="width:${pct}%"></i></div></div>
+    <span class="btn ${r.answered ? '' : 'primary'} full mt14">
+      ${r.answered
+        ? (r.needed ? `${r.needed} more and it opens` : 'Read the answers')
+        : 'Add your answer to see the rest'}</span>
+  </a>`;
+}
+
+function viewRound(detail) {
+  const r = detail && detail.active;
+  const hist = (detail && detail.history) || [];
+
+  let main;
+  if (!r) {
+    main = `<div class="round empty-round">
+      <div class="tagline">The floor is free</div>
+      <p class="rq mt8">Nothing is open right now.</p>
+      <p class="small muted mt8">One question or thought runs at a time. Put yours up and
+        everyone gets an email.</p>
+      <button class="btn primary full mt14" data-act="newround">Ask the circle something</button>
+    </div>`;
+  } else {
+    const pct = Math.min(100, Math.round((r.count / r.threshold) * 100));
+    main = `<div class="round">
+      <div class="row gap10">
+        <span class="tagline grow">${esc(KIND_LABEL[r.kind] || 'Question')}</span>
+        <span class="faint tiny">${r.count} of ${r.threshold} · ${esc(timeLeft(r))}</span>
+      </div>
+      <p class="rq mt8">${esc(r.title)}</p>
+      ${r.body ? `<p class="small muted mt8">${esc(r.body)}</p>` : ''}
+      <div class="row gap10 mt14">
+        ${r.author ? `<a class="row gap6" href="#/p/${r.author.id}">${av(r.author, 'xs')}
+          <span class="small faint">${esc(r.author.name)} asked${r.age_days ? ` · ${r.age_days}d ago` : ''}</span></a>` : ''}
+      </div>
+      <div class="meter mt14"><div class="bar"><i style="width:${pct}%"></i></div>
+        <div class="small faint mt8">${r.needed
+          ? `${r.needed} more ${r.needed === 1 ? 'answer' : 'answers'} and it opens up — or ${esc(timeLeft(r))} on the clock, whichever comes first`
+          : 'Closing now'}</div></div>
+
+      ${r.locked ? `
+        <div class="locked mt20">
+          <div class="lk">🔒</div>
+          <p class="small">You will see everyone's answers as soon as you have written your own.
+            That way nobody is copying the first person.</p>
+        </div>
+        <form data-answerform="${r.id}" class="mt14">
+          <textarea class="field" name="body" rows="5" maxlength="2000" autofocus
+            placeholder="No wrong answer. A couple of lines is plenty."></textarea>
+          <button class="btn primary full mt14">Answer &amp; unlock the rest</button>
+        </form>`
+        : `
+        <div class="mt20">
+          <div class="kt" style="--c:var(--good)">Your answer</div>
+          <form data-answerform="${r.id}">
+            <textarea class="field" name="body" rows="4" maxlength="2000">${esc(r.my_answer)}</textarea>
+            <button class="btn sm mt8">Update mine</button>
+          </form>
+        </div>
+        ${r.answers.length ? `<div class="mt20">
+          <div class="kt" style="--c:var(--curious)">Everyone else</div>
+          ${r.answers.filter(a => a.person_id !== S.me.id).map(answerBlock).join('')
+            || '<p class="small faint">You are first. The rest will appear here.</p>'}
+        </div>` : ''}`}
+
+      ${r.can_close ? `<button class="btn ghost sm full mt20" data-closeround="${r.id}">
+        ${r.stale && !r.mine ? 'This has stalled — close it for everyone' : 'Close it now and move on'}</button>` : ''}
+      ${r.mine && r.count === 0 ? `<button class="btn ghost sm full mt8 danger" data-delround="${r.id}">
+        Delete this</button>` : ''}
+    </div>`;
+  }
+
+  return `<div class="view">
+    ${main}
+    ${hist.length ? `<div class="sec-head"><h2>Already answered</h2></div>
+      ${hist.map(h => `<a class="pastround" href="#/round/${h.id}">
+        <div class="row gap10">
+          <span class="grow" style="font-weight:600;font-size:15px">${esc(h.title)}</span>
+          <span class="faint tiny">${h.count}</span>
+        </div>
+        <div class="row gap6 mt8">
+          ${h.author ? av(h.author, 'xs') : ''}
+          <span class="tiny faint">${h.author ? esc(firstName(h.author.name)) : ''} asked</span>
+        </div>
+      </a>`).join('')}`
+      : `<p class="empty">Nothing in the archive yet.</p>`}
+  </div>`;
+}
+
+function answerBlock(a) {
+  return `<div class="answer">
+    <div class="row gap10">
+      <a href="#/p/${a.person_id}">${av(a, 'sm')}</a>
+      <span class="grow small" style="font-weight:600">${esc(a.name)}</span>
+      <span class="faint tiny">${ago(a.at)}</span>
+    </div>
+    <p class="ab mt8">${esc(a.body)}</p>
+  </div>`;
+}
+
+function viewRoundDetail(r) {
+  if (!r) return skeleton();
+  return `<div class="view">
+    <button class="btn ghost sm" data-back>← Back</button>
+    <div class="round mt14 ${r.status === 'done' ? 'done' : ''}">
+      <div class="row gap10">
+        <span class="tagline grow">${r.status === 'done' ? 'Closed' : 'Open'}</span>
+        <span class="faint tiny">${r.count} answers</span>
+      </div>
+      <p class="rq mt8">${esc(r.title)}</p>
+      ${r.body ? `<p class="small muted mt8">${esc(r.body)}</p>` : ''}
+      ${r.author ? `<a class="row gap6 mt14" href="#/p/${r.author.id}">${av(r.author, 'xs')}
+        <span class="small faint">${esc(r.author.name)} asked</span></a>` : ''}
+    </div>
+    ${r.locked
+      ? `<div class="locked mt14"><div class="lk">🔒</div>
+           <p class="small">Answer it first and the rest open up.</p></div>
+         <a class="btn primary full mt14" href="#/round">Go and answer</a>`
+      : `<div class="mt20">${r.answers.map(answerBlock).join('')
+          || '<p class="empty">Nobody answered this one.</p>'}</div>`}
+  </div>`;
+}
+
+function newRoundSheet() {
+  modal(`<h3>Put something to the circle</h3>
+    <p class="small muted">One at a time. Everyone gets an email, and it closes once
+      enough people have answered.</p>
+    <form data-roundform class="mt20">
+      <label class="lbl">What is it?</label>
+      <select class="field" name="kind">
+        <option value="question">A question — I want to hear answers</option>
+        <option value="thought">A thought — I want reactions</option>
+        <option value="idea">An idea — I want to know if it holds up</option>
+      </select>
+      <label class="lbl mt14">Say it in one line</label>
+      <input class="field" name="title" maxlength="240" autofocus required
+        placeholder="e.g. What did you change your mind about this year?">
+      <label class="lbl mt14">Any context? (optional)</label>
+      <textarea class="field" name="body" rows="3" maxlength="900"
+        placeholder="Why you are asking, or what made you think of it."></textarea>
+      <button class="btn primary full mt20">Put it up</button>
+      <button type="button" class="btn ghost full mt8" data-act="close">Cancel</button>
+    </form>`);
 }
 
 /* ------------------------------------------------------- how it works */
@@ -585,8 +768,8 @@ function viewProjects() {
 let sparkFilter = 'mine';
 
 function sparkCard(s) {
-  const mine = s.a.id === S.me.id || s.b.id === S.me.id;
-  const other = s.a.id === S.me.id ? s.b : s.a;
+  const mine  = s.a.id === S.me.id || s.b.id === S.me.id;
+  const owner = s.initiator === S.me.id;
   return `<div class="spark ${mine ? 'mine' : ''}">
     <div class="top">
       <a href="#/p/${s.a.id}">${av(s.a, 'sm')}</a>
@@ -603,6 +786,8 @@ function sparkCard(s) {
         <button class="btn sm" data-status="${s.id}|scheduled">Scheduled</button>
         <button class="btn sm primary" data-done="${s.id}">We talked</button>` : ''}
       <button class="btn sm ghost" data-share="${attr({ a: s.a.name, b: s.b.name, topic: s.topic, msg: s.message })}">Share</button>
+      ${owner ? `<button class="btn sm ghost" data-editspark="${s.id}">Edit</button>
+        <button class="btn sm ghost danger" data-delspark="${s.id}">Delete</button>` : ''}
       ${mine ? `<span class="grow"></span><span class="faint tiny" style="align-self:center">${ago(s.updated)}</span>` : ''}
     </div>
   </div>`;
@@ -653,17 +838,37 @@ function sparkSheet(pre) {
     </form>`);
 }
 
-function sparkDone(other, topic, message) {
+function sparkDone(other, topic, message, notified) {
   const url = location.origin + location.pathname.replace(/[^/]*$/, '') + '#/sparks';
   const text = `⚡ New spark on ${S.app.name}\n${S.me.name} → ${other.name}\n“${topic}”`
     + (message ? `\n\n${message}` : '') + `\n\n${url}`;
   modal(`<div class="center"><div style="font-size:40px">⚡</div>
     <h3 class="mt8">Spark created</h3>
-    <p class="small muted mt8">Now put it where the group actually lives.</p></div>
+    <p class="small muted mt8">${notified
+      ? `${esc(firstName(other.name))} has been emailed. Put it in the group chat too — that is where it actually gets read.`
+      : 'Now put it where the group actually lives.'}</p></div>
     <a class="btn primary full mt20" target="_blank" rel="noopener"
        href="https://wa.me/?text=${encodeURIComponent(text)}">Share to WhatsApp</a>
     <button class="btn full mt8" data-copy="${esc(text)}">Copy the message</button>
     <button class="btn ghost full mt8" data-act="close">Done</button>`);
+}
+
+function editSparkSheet(s) {
+  const others = S.people.filter(p => p.id !== S.me.id);
+  modal(`<h3>Edit spark</h3>
+    <p class="small muted">Only you can see this — you started it.</p>
+    <form data-editsparkform="${s.id}" class="mt20">
+      <label class="lbl">With</label>
+      <select class="field" name="b_id">
+        ${others.map(p => `<option value="${p.id}" ${p.id === s.b.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+      </select>
+      <label class="lbl mt14">What's it about?</label>
+      <input class="field" name="topic" maxlength="160" required autofocus value="${esc(s.topic)}">
+      <label class="lbl mt14">Say something (optional)</label>
+      <textarea class="field" name="message" maxlength="600">${esc(s.message || '')}</textarea>
+      <button class="btn primary full mt20">Save</button>
+      <button type="button" class="btn ghost full mt8" data-act="close">Cancel</button>
+    </form>`);
 }
 
 function doneSheet(id) {
@@ -689,6 +894,18 @@ function editMeSheet() {
         placeholder="Pharmacist turned social entrepreneur">
       <label class="lbl mt14">Where you are</label>
       <input class="field" name="city" maxlength="60" value="${esc(me.city || '')}" placeholder="Lahore">
+
+      ${me.mail ? `
+        <label class="lbl mt20">Email</label>
+        <input class="field" type="email" name="email" maxlength="190" value="${esc(me.email || '')}"
+          placeholder="you@example.com">
+        <p class="faint tiny mt8">Only used to tell you when someone sparks with you.
+          Nobody else in the circle can see it.</p>
+        <label class="row gap10 mt14 small muted" style="cursor:pointer">
+          <input type="checkbox" name="notify" ${me.notify ? 'checked' : ''}>
+          Email me when someone starts a spark with me
+        </label>` : ''}
+
       <button class="btn primary full mt20">Save</button>
       <button type="button" class="btn ghost full mt8" data-act="close">Cancel</button>
     </form>`);
@@ -746,6 +963,25 @@ async function render() {
     app.innerHTML = viewHow();
     return;
   }
+  if (r.startsWith('/round/')) {
+    const id = +r.slice(7);
+    app.innerHTML = viewRoundDetail(cache['r' + id]);
+    if (!cache['r' + id]) {
+      try {
+        cache['r' + id] = (await api('round', null, { id })).round;
+        if (location.hash.replace(/^#/, '') === r) app.innerHTML = viewRoundDetail(cache['r' + id]);
+      } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    }
+    return;
+  }
+  if (r === '/round') {
+    app.innerHTML = viewRound(S.rounds);
+    if (!S.rounds) {
+      S.rounds = await api('rounds');
+      if (location.hash.replace(/^#/, '') === '/round') app.innerHTML = viewRound(S.rounds);
+    }
+    return;
+  }
   if (r === '/people')   { app.innerHTML = viewPeople(); return; }
   if (r === '/projects') { app.innerHTML = viewProjects(); return; }
   if (r === '/sparks') {
@@ -795,7 +1031,8 @@ document.addEventListener('click', async ev => {
     if (a === 'close')   return closeModal();
     if (a === 'switch')  return switchSheet();
     if (a === 'editme')  return editMeSheet();
-    if (a === 'addproj') return projSheet();
+    if (a === 'addproj')  return projSheet();
+    if (a === 'newround') return newRoundSheet();
     if (a === 'signout') return guard(async () => { await api('signout', {}); location.reload(); });
   }
 
@@ -811,6 +1048,36 @@ document.addEventListener('click', async ev => {
 
   const dn = t.closest('[data-done]');
   if (dn) return doneSheet(+dn.dataset.done);
+
+  const cr = t.closest('[data-closeround]');
+  if (cr) return guard(async () => {
+    if (!confirm('Close this and let everyone read the answers? Nobody else can add one after that.')) return;
+    await api('round_close', { id: +cr.dataset.closeround });
+    S.rounds = null; cache = {};
+    toast('Closed'); await refresh(true); go('/round');
+  });
+
+  const dr = t.closest('[data-delround]');
+  if (dr) return guard(async () => {
+    if (!confirm('Delete this? The floor goes back to whoever wants it.')) return;
+    await api('round_delete', { id: +dr.dataset.delround });
+    S.rounds = null;
+    toast('Deleted'); await refresh(true); go('/round');
+  });
+
+  const es = t.closest('[data-editspark]');
+  if (es) {
+    const s = findSpark(+es.dataset.editspark);
+    return s ? editSparkSheet(s) : toast('Could not find that spark.');
+  }
+
+  const ds = t.closest('[data-delspark]');
+  if (ds) return guard(async () => {
+    if (!confirm('Delete this spark? This cannot be undone.')) return;
+    await api('spark_delete', { id: +ds.dataset.delspark });
+    toast('Deleted');
+    await refresh(true);
+  });
 
   const stt = t.closest('[data-status]');
   if (stt) {
@@ -856,6 +1123,16 @@ function currentPersonId() {
   return r.startsWith('/p/') ? +r.slice(3) : 0;
 }
 
+/** Sparks are cached in a few places depending on which view loaded them. */
+function findSpark(id) {
+  const pools = [S.sparks, S.allSparks, ...Object.values(cache).map(c => c && c.sparks)];
+  for (const pool of pools) {
+    const hit = (pool || []).find(s => s.id === id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 document.addEventListener('submit', async ev => {
   const f = ev.target;
   const fd = new FormData(f);
@@ -881,10 +1158,47 @@ document.addEventListener('submit', async ev => {
     const topic = val('topic'), message = val('message');
     if (!topic) return toast('What is it about?');
     return guard(async () => {
-      await api('spark_create', { ...pre, topic, message });
+      const res = await api('spark_create', { ...pre, topic, message });
       const other = S.people.find(p => p.id === +pre.b_id);
       await refresh(true);
-      sparkDone(other, topic, message);
+      sparkDone(other, topic, message, res.notified);
+    });
+  }
+
+  if (f.dataset.roundform !== undefined) {
+    ev.preventDefault();
+    if (!val('title')) return toast('Say it in one line first.');
+    return guard(async () => {
+      const j = await api('round_create', { kind: val('kind'), title: val('title'), body: val('body') });
+      closeModal();
+      S.rounds = null;
+      await refresh(true);
+      go('/round');
+      toast(j.mailed ? `Up. ${j.mailed} people emailed.` : 'It is up.');
+    });
+  }
+
+  if (f.dataset.answerform !== undefined) {
+    ev.preventDefault();
+    const body = val('body');
+    if (!body) return toast('Write something first.');
+    return guard(async () => {
+      const j = await api('round_answer', { round_id: +f.dataset.answerform, body });
+      S.rounds = null; cache = {};
+      await refresh(true);
+      await render();
+      toast(j.closed ? 'That closed it — everyone can read it now.'
+                     : 'In. Here is what everyone else said.');
+    });
+  }
+
+  if (f.dataset.editsparkform !== undefined) {
+    ev.preventDefault();
+    const topic = val('topic');
+    if (!topic) return toast('What is it about?');
+    return guard(async () => {
+      await api('spark_edit', { id: +f.dataset.editsparkform, b_id: +val('b_id'), topic, message: val('message') });
+      closeModal(); toast('Saved'); await refresh(true);
     });
   }
 
@@ -900,7 +1214,12 @@ document.addEventListener('submit', async ev => {
   if (f.dataset.meform !== undefined) {
     ev.preventDefault();
     return guard(async () => {
-      await api('save_me', { emoji: val('emoji'), headline: val('headline'), city: val('city') });
+      const payload = { emoji: val('emoji'), headline: val('headline'), city: val('city') };
+      if (f.querySelector('[name=email]')) {          // only when mail is configured
+        payload.email  = val('email');
+        payload.notify = fd.get('notify') ? 1 : 0;
+      }
+      await api('save_me', payload);
       closeModal(); await refresh(true);
     });
   }

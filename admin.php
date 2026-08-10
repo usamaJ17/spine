@@ -7,6 +7,7 @@ if (!db_installed()) {
     header('Location: setup.php');
     exit;
 }
+db_sync();
 
 $error = '';
 

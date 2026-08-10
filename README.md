@@ -117,6 +117,86 @@ invitation, including the ask that actually gets people to engage:
 Send them **privately**, one per person. A link in the group chat signs
 everyone in as the same person.
 
+## The Round
+
+One question, thought or idea holds the floor at a time. Anyone can put one up
+when the floor is free; everyone gets an email; it closes and the next person
+can post.
+
+**You cannot read anyone else's answer to the open round until you have written
+your own.** Otherwise the first answer anchors everybody. Once it moves to
+history it is readable by everyone — and still answerable, so whoever was slow
+can add theirs late.
+
+It leaves the floor whichever happens first:
+
+- enough answers land (default 6), or
+- it has held the floor long enough (default 4 days)
+
+Three days after that (default day 7) everyone gets a digest email with the
+question and every answer in full — the extra gap is what gives late answers
+time to arrive.
+
+The author can close early, and after 10 days anyone can, so a stalled round
+never blocks the circle forever. All three numbers are in `/admin.php`.
+
+### The daily job
+
+`cron.php` does the closing and the digests. In hPanel → **Advanced → Cron
+Jobs**, once a day:
+
+```bash
+curl -s "https://yourdomain.com/cron.php?key=YOUR_CRON_KEY"
+```
+
+Set `CRON_KEY` in `.env` first — without it the URL returns 404 to everyone.
+Running it as PHP directly needs no key, since that is not a web request:
+
+```bash
+/usr/bin/php /home/uXXXXXXXX/public_html/cron.php
+```
+
+The same schedule also runs whenever anyone opens the app, so a cron job that
+is never set up or quietly stops only makes things late — it never stalls the
+circle.
+
+## Email notifications
+
+When someone creates a spark, the other person gets an email. Off unless
+`MAIL_HOST` is set in `.env` — see the MAIL block in `.env.example`.
+Hostinger: `smtp.hostinger.com`, port 465, full mailbox address as the username.
+
+`/admin.php` has a **Send a test email** button. Use it before trusting any of
+this; it reports the actual SMTP error if something is wrong.
+
+Sending is best-effort and never blocks a spark: if the mail server is down, has
+no address for that person, or they have muted notifications, the spark is still
+created and the API just reports `notified: false`.
+
+### Addresses
+
+Addresses live in the database only — never in a tracked file, because this repo
+may be public. Nobody but the person themselves and the admin can see an address;
+`person_public()` has no email field, so the API cannot leak them.
+
+Three ways to set them:
+
+- **Bulk, from the browser** — `/admin.php` → *Import addresses in bulk*. Paste a
+  To: line straight out of your email client. It shows you every match before
+  saving anything.
+- **Bulk, from the shell** — `php tools/emails.php import addresses.txt` to
+  preview, then add `--apply`. Also `list`, `set "Full Name" a@b.com`, and
+  `clear "Full Name"`.
+- **One at a time** — the Edit form for each person in `/admin.php`.
+
+Matching uses the display name when there is one, and otherwise guesses from the
+local part of the address (`ghafoorilyas1@` → Ilyas Ghafoor). It refuses to guess
+when two people score equally, so an address is never assigned to the wrong
+person silently.
+
+Anyone can change their own address and mute notifications from **Edit your
+header** on their profile.
+
 ## The explainer page
 
 `#/how` — what the platform is for, the four profile boxes, sparks, projects,

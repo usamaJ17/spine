@@ -357,6 +357,196 @@ function pair_of_the_week(): ?array
     ];
 }
 
+/* ------------------------------------------------------------- rounds */
+
+/**
+ * One question or thought is open at a time. Everyone answers; when enough
+ * answers land it closes and moves to history, and the floor is free again.
+ *
+ * The rule that makes it work: you cannot read anyone else's answer to a
+ * LIVE round until you have written your own. Otherwise the first answer
+ * anchors everybody. History is open to all.
+ */
+
+function round_threshold(): int
+{
+    return max(2, (int) setting('round_threshold', '6'));
+}
+
+/** Days it holds the floor before moving to history. */
+function round_days(): int
+{
+    return max(1, (int) setting('round_days', '4'));
+}
+
+/** Days before the digest of everyone's answers goes out. */
+function round_digest_days(): int
+{
+    return max(round_days(), (int) setting('round_digest_days', '7'));
+}
+
+/** Days after which anyone may close a stalled round, so it can't deadlock. */
+const ROUND_STALE_DAYS = 10;
+
+/**
+ * Close anything past its deadline and post any digests that are due.
+ * Called by cron.php, and also lazily on ordinary requests so the app still
+ * behaves correctly if the cron job is never set up or stops firing.
+ */
+function run_round_schedule(): array
+{
+    $closed = $digested = [];
+
+    // Day 4: the floor is handed back.
+    $due = db()->prepare("SELECT * FROM rounds WHERE status = 'active'
+                            AND expires_at IS NOT NULL AND expires_at <= ?");
+    $due->execute([now()]);
+    foreach ($due->fetchAll() as $r) {
+        if (close_round((int) $r['id'], null)) {
+            activity_log('round_done', (int) $r['author_id'], null, (int) $r['id'], $r['title']);
+            $closed[] = ['id' => (int) $r['id'], 'title' => $r['title']];
+        }
+    }
+
+    // Day 7: everyone gets the question and every answer.
+    $dig = db()->prepare("SELECT * FROM rounds WHERE digest_sent = 0
+                            AND digest_at IS NOT NULL AND digest_at <= ?");
+    $dig->execute([now()]);
+    foreach ($dig->fetchAll() as $r) {
+        db()->prepare('UPDATE rounds SET digest_sent = 1 WHERE id = ?')->execute([(int) $r['id']]);
+        $answers = round_answers((int) $r['id']);
+        if (!$answers) {
+            continue;                       // nothing worth mailing
+        }
+        $sent = notify_round_digest($r, $answers);
+        $digested[] = ['id' => (int) $r['id'], 'title' => $r['title'], 'mailed' => $sent];
+    }
+
+    return ['closed' => $closed, 'digested' => $digested];
+}
+
+function round_answer_count(int $roundId): int
+{
+    $st = db()->prepare('SELECT COUNT(*) FROM round_answers WHERE round_id = ?');
+    $st->execute([$roundId]);
+    return (int) $st->fetchColumn();
+}
+
+function active_round(): ?array
+{
+    $r = db()->query("SELECT * FROM rounds WHERE status = 'active' ORDER BY id DESC LIMIT 1")->fetch();
+    return $r ?: null;
+}
+
+function find_round(int $id): ?array
+{
+    $st = db()->prepare('SELECT * FROM rounds WHERE id = ?');
+    $st->execute([$id]);
+    return $st->fetch() ?: null;
+}
+
+function round_answers(int $roundId): array
+{
+    $st = db()->prepare(
+        'SELECT ra.*, p.name, p.emoji
+           FROM round_answers ra
+           JOIN people p ON p.id = ra.person_id
+          WHERE ra.round_id = ?
+       ORDER BY ra.id ASC'
+    );
+    $st->execute([$roundId]);
+    return array_map(fn($a) => [
+        'id'        => (int) $a['id'],
+        'person_id' => (int) $a['person_id'],
+        'name'      => $a['name'],
+        'emoji'     => $a['emoji'],
+        'hue'       => avatar_hue($a['name']),
+        'body'      => $a['body'],
+        'at'        => $a['created_at'],
+        'edited'    => $a['updated_at'] !== $a['created_at'],
+    ], $st->fetchAll());
+}
+
+function my_round_answer(int $roundId, int $personId): ?array
+{
+    $st = db()->prepare('SELECT * FROM round_answers WHERE round_id = ? AND person_id = ?');
+    $st->execute([$roundId, $personId]);
+    $a = $st->fetch();
+    return $a ?: null;
+}
+
+function round_age_days(array $round): int
+{
+    $t = strtotime($round['created_at']) ?: time();
+    return (int) floor((time() - $t) / 86400);
+}
+
+/**
+ * Shape one round for the front-end. Answers are withheld from a live round
+ * until the viewer has answered it themselves.
+ */
+function round_public(array $r, int $meId): array
+{
+    $count  = round_answer_count((int) $r['id']);
+    $mine   = my_round_answer((int) $r['id'], $meId);
+    $live   = $r['status'] === 'active';
+    // Blind only while it holds the floor. Once it is history everyone can
+    // read it, and anyone who missed it can still add their answer.
+    $locked = $live && !$mine;
+
+    $author = find_person((int) $r['author_id']);
+    $age    = round_age_days($r);
+    $left   = $r['expires_at'] ? strtotime($r['expires_at']) - time() : null;
+
+    return [
+        'id'        => (int) $r['id'],
+        'kind'      => $r['kind'],
+        'hours_left' => $left !== null ? max(0, (int) ceil($left / 3600)) : null,
+        'title'     => $r['title'],
+        'body'      => $r['body'],
+        'status'    => $r['status'],
+        'threshold' => (int) $r['threshold'],
+        'count'     => $count,
+        'needed'    => max(0, (int) $r['threshold'] - $count),
+        'author'    => $author ? [
+            'id' => (int) $author['id'], 'name' => $author['name'],
+            'emoji' => $author['emoji'], 'hue' => avatar_hue($author['name']),
+        ] : null,
+        'mine'      => (int) $r['author_id'] === $meId,
+        'answered'  => $mine !== null,
+        'my_answer' => $mine ? $mine['body'] : '',
+        'locked'    => $locked,
+        'open'      => $live,
+        'can_answer' => true,               // history stays answerable
+        'answers'   => $locked ? [] : round_answers((int) $r['id']),
+        'age_days'  => $age,
+        'stale'     => $live && $age >= ROUND_STALE_DAYS,
+        'can_close' => $live && ((int) $r['author_id'] === $meId || $age >= ROUND_STALE_DAYS),
+        'created'   => $r['created_at'],
+        'closed'    => $r['closed_at'],
+    ];
+}
+
+function round_history(int $meId, int $limit = 30): array
+{
+    $rows = db()->query(
+        "SELECT * FROM rounds WHERE status = 'done' ORDER BY id DESC LIMIT " . (int) $limit
+    )->fetchAll();
+    return array_map(fn($r) => round_public($r, $meId), $rows);
+}
+
+/** Close a round and move it to history. Returns true if it actually closed. */
+function close_round(int $roundId, ?int $byPersonId): bool
+{
+    $r = find_round($roundId);
+    if (!$r || $r['status'] !== 'active') {
+        return false;
+    }
+    db()->prepare("UPDATE rounds SET status = 'done', closed_at = ?, closed_by = ? WHERE id = ?")
+        ->execute([now(), $byPersonId, $roundId]);
+    return true;
+}
+
 /* -------------------------------------------------------------- stats */
 
 function stats(): array

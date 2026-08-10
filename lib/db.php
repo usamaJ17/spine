@@ -74,6 +74,8 @@ function db_schema(): array
             emoji        VARCHAR(16)  DEFAULT '',
             headline     VARCHAR(200) DEFAULT '',
             city         VARCHAR(80)  DEFAULT '',
+            email        VARCHAR(190) DEFAULT '',
+            notify       INTEGER      NOT NULL DEFAULT 1,
             token        VARCHAR(40)  NOT NULL,
             cookie_epoch INTEGER      NOT NULL DEFAULT 1,
             is_admin     INTEGER      NOT NULL DEFAULT 0,
@@ -134,7 +136,34 @@ function db_schema(): array
             created_at VARCHAR(25) NOT NULL
         ) {OPTS}",
 
+        "CREATE TABLE IF NOT EXISTS rounds (
+            id         {PK},
+            author_id  INTEGER NOT NULL,
+            kind       VARCHAR(16)  NOT NULL DEFAULT 'question',
+            title      VARCHAR(240) NOT NULL,
+            body       VARCHAR(900) DEFAULT '',
+            status     VARCHAR(16)  NOT NULL DEFAULT 'active',
+            threshold  INTEGER      NOT NULL DEFAULT 6,
+            expires_at  VARCHAR(25) DEFAULT NULL,
+            digest_at   VARCHAR(25) DEFAULT NULL,
+            digest_sent INTEGER     NOT NULL DEFAULT 0,
+            created_at VARCHAR(25)  NOT NULL,
+            closed_at  VARCHAR(25)  DEFAULT NULL,
+            closed_by  INTEGER      DEFAULT NULL
+        ) {OPTS}",
+
+        "CREATE TABLE IF NOT EXISTS round_answers (
+            id         {PK},
+            round_id   INTEGER NOT NULL,
+            person_id  INTEGER NOT NULL,
+            body       VARCHAR(2000) NOT NULL,
+            created_at VARCHAR(25) NOT NULL,
+            updated_at VARCHAR(25) NOT NULL
+        ) {OPTS}",
+
         "CREATE INDEX IF NOT EXISTS idx_pt_person ON person_tags (person_id)",
+        "CREATE INDEX IF NOT EXISTS idx_round_status ON rounds (status)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ra_one ON round_answers (round_id, person_id)",
         "CREATE INDEX IF NOT EXISTS idx_pt_tag    ON person_tags (tag_id)",
         "CREATE INDEX IF NOT EXISTS idx_tag_canon ON tags (canon)",
         "CREATE INDEX IF NOT EXISTS idx_sp_a      ON sparks (a_id)",
@@ -170,6 +199,64 @@ function db_migrate(): void
             continue;
         }
         db()->exec($stmt);
+    }
+    set_setting('schema_version', (string) SCHEMA_VERSION);
+}
+
+/* ------------------------------------------------------------- upgrades */
+
+/**
+ * Bumped whenever a column is added. db_sync() compares it against the
+ * value stored in settings and patches an already-installed database, so a
+ * live site picks up new columns on the next request after a deploy.
+ */
+const SCHEMA_VERSION = 3;
+
+function table_columns(string $table): array
+{
+    if (db_driver() === 'mysql') {
+        $rows = db()->query("SHOW COLUMNS FROM `$table`")->fetchAll();
+        return array_column($rows, 'Field');
+    }
+    $rows = db()->query("PRAGMA table_info($table)")->fetchAll();
+    return array_column($rows, 'name');
+}
+
+function add_column_if_missing(string $table, string $column, string $definition): void
+{
+    if (in_array($column, table_columns($table), true)) {
+        return;
+    }
+    db()->exec("ALTER TABLE $table ADD COLUMN $column $definition");
+}
+
+/** Patch an existing database up to SCHEMA_VERSION. Safe to run repeatedly. */
+function db_sync(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+
+    if ((int) setting('schema_version', '1') >= SCHEMA_VERSION) {
+        return;
+    }
+    try {
+        // v2 — email notifications
+        add_column_if_missing('people', 'email', "VARCHAR(190) DEFAULT ''");
+        add_column_if_missing('people', 'notify', 'INTEGER NOT NULL DEFAULT 1');
+
+        // v3 — rounds. CREATE TABLE IF NOT EXISTS is safe to re-run, so the
+        // whole schema pass brings a live database up to date.
+        db_migrate();
+        add_column_if_missing('rounds', 'expires_at', 'VARCHAR(25) DEFAULT NULL');
+        add_column_if_missing('rounds', 'digest_at', 'VARCHAR(25) DEFAULT NULL');
+        add_column_if_missing('rounds', 'digest_sent', 'INTEGER NOT NULL DEFAULT 0');
+
+        set_setting('schema_version', (string) SCHEMA_VERSION);
+    } catch (Throwable $e) {
+        error_log('[spine] schema upgrade failed: ' . $e->getMessage());
     }
 }
 

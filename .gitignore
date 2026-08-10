@@ -5,3 +5,7 @@
 data/*.sqlite*
 data/secret.key
 data/.installed
+
+# Pasted address lists — never commit real personal emails.
+*.emails.txt
+addresses.txt

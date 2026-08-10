@@ -9,6 +9,7 @@ ini_set('display_errors', '0');   // flip to '1' while debugging on your server
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/model.php';
+require_once __DIR__ . '/mail.php';
 
 date_default_timezone_set('UTC');
 mb_internal_encoding('UTF-8');

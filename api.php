@@ -6,6 +6,7 @@ require_once __DIR__ . '/lib/bootstrap.php';
 if (!db_installed()) {
     fail('Not installed yet. Open setup.php first.', 503);
 }
+db_sync();
 
 $action = isset($_GET['a']) ? (string) $_GET['a'] : '';
 $isPost = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
@@ -47,6 +48,10 @@ try {
         /* ------------------------------------------------------ reading */
 
         case 'bootstrap': {
+            // Belt and braces for the cron job: if it never runs, the deadlines
+            // still land — just whenever somebody next opens the app.
+            run_round_schedule();
+
             $people = all_people();
             $sum    = $me ? overlap_summary((int) $me['id']) : [];
             foreach ($people as &$p) {
@@ -61,7 +66,13 @@ try {
             json_out([
                 'ok'       => true,
                 'app'      => ['name' => cfg('app_name'), 'tagline' => cfg('tagline')],
-                'me'       => $me ? person_public($me) : null,
+                // Only your own record carries an email — person_public() never
+                // exposes one, so nobody can harvest addresses from the API.
+                'me'       => $me ? person_public($me) + [
+                    'email'  => (string) ($me['email'] ?? ''),
+                    'notify' => (int) ($me['notify'] ?? 1) === 1,
+                    'mail'   => mail_enabled(),
+                ] : null,
                 'people'   => $people,
                 'kinds'    => kind_meta(),
                 'stats'    => stats(),
@@ -71,6 +82,7 @@ try {
                 'projects' => all_projects(),
                 'vocab'    => tag_vocabulary(),
                 'empty'    => empty_profiles(),
+                'round'    => ($me && ($ar = active_round())) ? round_public($ar, (int) $me['id']) : null,
             ]);
         }
 
@@ -114,12 +126,23 @@ try {
         /* -------------------------------------------------------- profile */
 
         case 'save_me': {
-            $me = require_me();
-            $st = db()->prepare('UPDATE people SET emoji = ?, headline = ?, city = ? WHERE id = ?');
+            $me    = require_me();
+            $email = clamp_str((string) param('email', $me['email'] ?? ''), 190);
+            if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                fail('That email address does not look right.');
+            }
+            $notify = param('notify');
+            $notify = ($notify === false || $notify === '0' || $notify === 0) ? 0 : 1;
+
+            $st = db()->prepare(
+                'UPDATE people SET emoji = ?, headline = ?, city = ?, email = ?, notify = ? WHERE id = ?'
+            );
             $st->execute([
                 clamp_str((string) param('emoji'), 8),
                 clamp_str((string) param('headline'), 160),
                 clamp_str((string) param('city'), 60),
+                $email,
+                $notify,
                 $me['id'],
             ]);
             json_out(['ok' => true]);
@@ -261,7 +284,20 @@ try {
             $id = (int) db()->lastInsertId();
             activity_log('spark', (int) $me['id'], $bId, $id, $topic);
 
-            json_out(['ok' => true, 'id' => $id, 'sparks' => spark_rows((int) $me['id'], null, 40)]);
+            // Let them know by email. Best-effort only: the spark is already
+            // saved, and a dead mail server must never turn that into an error.
+            [$sent, $mailErr] = notify_spark($me, $other, $topic, (string) param('message'));
+            if (!$sent) {
+                error_log("[spine] no spark email to {$other['name']}: $mailErr");
+            }
+
+            json_out([
+                'ok'       => true,
+                'id'       => $id,
+                'notified' => $sent,
+                'notice'   => $sent ? ($other['name'] . ' has been emailed.') : '',
+                'sparks'   => spark_rows((int) $me['id'], null, 40),
+            ]);
         }
 
         case 'spark_update': {
@@ -291,6 +327,205 @@ try {
             json_out(['ok' => true, 'sparks' => spark_rows((int) $me['id'], null, 40)]);
         }
 
+        case 'spark_edit': {
+            $me = require_me();
+            $st = db()->prepare('SELECT * FROM sparks WHERE id = ?');
+            $st->execute([(int) param('id', 0)]);
+            $s = $st->fetch();
+            if (!$s) {
+                fail('No such spark.', 404);
+            }
+            if ((int) $s['initiator_id'] !== (int) $me['id'] && !admin_logged_in()) {
+                fail('Only whoever started this spark can edit it.', 403);
+            }
+
+            $topic = clamp_str((string) param('topic', $s['topic']), 160);
+            if ($topic === '') {
+                fail('What is it about?');
+            }
+            $message = clamp_str((string) param('message', $s['message']), 600);
+
+            $bId = (int) param('b_id', $s['b_id']);
+            if ($bId !== (int) $s['b_id']) {
+                if ($bId === (int) $me['id']) {
+                    fail('Pick someone else.');
+                }
+                if (!find_person($bId)) {
+                    fail('No such person.', 404);
+                }
+            }
+
+            db()->prepare(
+                'UPDATE sparks SET b_id = ?, topic = ?, message = ?, updated_at = ? WHERE id = ?'
+            )->execute([$bId, $topic, $message, now(), (int) $s['id']]);
+
+            json_out(['ok' => true, 'sparks' => spark_rows((int) $me['id'], null, 40)]);
+        }
+
+        case 'spark_delete': {
+            $me = require_me();
+            $st = db()->prepare('SELECT * FROM sparks WHERE id = ?');
+            $st->execute([(int) param('id', 0)]);
+            $s = $st->fetch();
+            if (!$s) {
+                fail('Already gone.', 404);
+            }
+            if ((int) $s['initiator_id'] !== (int) $me['id'] && !admin_logged_in()) {
+                fail('Only whoever started this spark can delete it.', 403);
+            }
+            db()->prepare('DELETE FROM sparks WHERE id = ?')->execute([(int) $s['id']]);
+            db()->prepare('DELETE FROM activity WHERE type IN (\'spark\', \'done\') AND ref_id = ?')
+                ->execute([(int) $s['id']]);
+
+            json_out(['ok' => true, 'sparks' => spark_rows((int) $me['id'], null, 40)]);
+        }
+
+        /* --------------------------------------------------------- rounds */
+
+        case 'rounds': {
+            $me  = require_me();
+            $act = active_round();
+            json_out([
+                'ok'        => true,
+                'active'    => $act ? round_public($act, (int) $me['id']) : null,
+                'history'   => round_history((int) $me['id']),
+                'threshold' => round_threshold(),
+            ]);
+        }
+
+        case 'round': {
+            $me = require_me();
+            $r  = find_round((int) param('id', 0));
+            if (!$r) {
+                fail('No such round.', 404);
+            }
+            json_out(['ok' => true, 'round' => round_public($r, (int) $me['id'])]);
+        }
+
+        case 'round_create': {
+            $me = require_me();
+            if (active_round()) {
+                fail('Something is already open. It has to close before the next one goes up.');
+            }
+            $title = clamp_str((string) param('title'), 240);
+            if ($title === '') {
+                fail('Say it in one line first.');
+            }
+            $kind = in_array(param('kind'), ['thought', 'idea'], true) ? (string) param('kind') : 'question';
+
+            $expires = gmdate('Y-m-d\TH:i:s\Z', time() + round_days() * 86400);
+            $digest  = gmdate('Y-m-d\TH:i:s\Z', time() + round_digest_days() * 86400);
+
+            $st = db()->prepare(
+                'INSERT INTO rounds (author_id, kind, title, body, status, threshold,
+                                     expires_at, digest_at, digest_sent, created_at)
+                 VALUES (?, ?, ?, ?, \'active\', ?, ?, ?, 0, ?)'
+            );
+            $st->execute([
+                $me['id'], $kind, $title,
+                clamp_str((string) param('body'), 900),
+                round_threshold(), $expires, $digest, now(),
+            ]);
+            $id = (int) db()->lastInsertId();
+            activity_log('round', (int) $me['id'], null, $id, $title);
+
+            $round  = find_round($id);
+            $mailed = notify_round_open($round, $me);
+
+            json_out([
+                'ok'     => true,
+                'id'     => $id,
+                'mailed' => $mailed,
+                'round'  => round_public($round, (int) $me['id']),
+            ]);
+        }
+
+        case 'round_answer': {
+            $me = require_me();
+            $r  = find_round((int) param('round_id', 0));
+            if (!$r) {
+                fail('No such round.', 404);
+            }
+            // Answering stays open after it moves to history — people who were
+            // slow should still get to have their say.
+            $body = clamp_str((string) param('body'), 2000);
+            if ($body === '') {
+                fail('Write something first.');
+            }
+
+            $existing = my_round_answer((int) $r['id'], (int) $me['id']);
+            if ($existing) {
+                db()->prepare('UPDATE round_answers SET body = ?, updated_at = ? WHERE id = ?')
+                    ->execute([$body, now(), (int) $existing['id']]);
+            } else {
+                db()->prepare(
+                    'INSERT INTO round_answers (round_id, person_id, body, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?)'
+                )->execute([(int) $r['id'], (int) $me['id'], $body, now(), now()]);
+                activity_log('answer', (int) $me['id'], null, (int) $r['id'], $r['title']);
+            }
+
+            // Enough answers? Close it and let everyone read.
+            $count  = round_answer_count((int) $r['id']);
+            $closed = false;
+            if (!$existing && $r['status'] === 'active' && $count >= (int) $r['threshold']) {
+                $closed = close_round((int) $r['id'], null);
+                if ($closed) {
+                    activity_log('round_done', (int) $me['id'], null, (int) $r['id'], $r['title']);
+                    notify_round_closed(find_round((int) $r['id']), $count);
+                }
+            }
+
+            json_out([
+                'ok'     => true,
+                'closed' => $closed,
+                'round'  => round_public(find_round((int) $r['id']), (int) $me['id']),
+            ]);
+        }
+
+        case 'round_close': {
+            $me = require_me();
+            $r  = find_round((int) param('id', 0));
+            if (!$r) {
+                fail('No such round.', 404);
+            }
+            if ($r['status'] !== 'active') {
+                fail('Already closed.');
+            }
+            $isAuthor = (int) $r['author_id'] === (int) $me['id'];
+            $stale    = round_age_days($r) >= ROUND_STALE_DAYS;
+            if (!$isAuthor && !$stale && !admin_logged_in()) {
+                fail('Only whoever posted this can close it early.', 403);
+            }
+            close_round((int) $r['id'], (int) $me['id']);
+            $count = round_answer_count((int) $r['id']);
+            activity_log('round_done', (int) $me['id'], null, (int) $r['id'], $r['title']);
+            if ($count > 0) {
+                notify_round_closed(find_round((int) $r['id']), $count);
+            }
+            json_out(['ok' => true, 'round' => round_public(find_round((int) $r['id']), (int) $me['id'])]);
+        }
+
+        case 'round_delete': {
+            $me = require_me();
+            $r  = find_round((int) param('id', 0));
+            if (!$r) {
+                fail('Already gone.', 404);
+            }
+            $isAuthor = (int) $r['author_id'] === (int) $me['id'];
+            if (!$isAuthor && !admin_logged_in()) {
+                fail('Only whoever posted this can remove it.', 403);
+            }
+            if (round_answer_count((int) $r['id']) > 0 && !admin_logged_in()) {
+                fail('People have already answered — close it instead of deleting it.');
+            }
+            db()->prepare('DELETE FROM round_answers WHERE round_id = ?')->execute([(int) $r['id']]);
+            db()->prepare('DELETE FROM rounds WHERE id = ?')->execute([(int) $r['id']]);
+            db()->prepare("DELETE FROM activity WHERE type IN ('round','round_done','answer') AND ref_id = ?")
+                ->execute([(int) $r['id']]);
+            json_out(['ok' => true]);
+        }
+
         /* ---------------------------------------------------------- admin */
 
         case 'admin_state': {
@@ -307,6 +542,8 @@ try {
                     'hue'      => avatar_hue($r['name']),
                     'headline' => $r['headline'],
                     'city'     => $r['city'],
+                    'email'    => (string) ($r['email'] ?? ''),
+                    'notify'   => (int) ($r['notify'] ?? 1) === 1,
                     'active'   => (int) $r['active'] === 1,
                     'is_admin' => (int) $r['is_admin'] === 1,
                     'sort'     => (int) $r['sort_order'],
@@ -343,6 +580,14 @@ try {
                 'env'     => is_file(__DIR__ . '/.env'),
                 'setup'   => is_file(__DIR__ . '/setup.php'),
                 'driver'  => db_driver(),
+                'rounds'  => [
+                    'threshold'   => round_threshold(),
+                    'days'        => round_days(),
+                    'digest_days' => round_digest_days(),
+                    'cron'        => env('CRON_KEY') !== null,
+                ],
+                'mail'    => mail_enabled(),
+                'mailhost' => mail_enabled() ? mail_config()['host'] . ':' . mail_config()['port'] : '',
             ]);
         }
 
@@ -353,16 +598,21 @@ try {
                 fail('Name required.');
             }
             $max = (int) db()->query('SELECT COALESCE(MAX(sort_order), 0) FROM people')->fetchColumn();
-            $st  = db()->prepare(
-                'INSERT INTO people (name, slug, emoji, headline, city, token, cookie_epoch,
-                                     is_admin, active, sort_order, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, ?, ?)'
+            $email = clamp_str((string) param('email'), 190);
+            if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                fail('That email address does not look right.');
+            }
+            $st = db()->prepare(
+                'INSERT INTO people (name, slug, emoji, headline, city, email, notify, token,
+                                     cookie_epoch, is_admin, active, sort_order, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, 0, 1, ?, ?)'
             );
             $st->execute([
                 $name, slugify($name),
                 clamp_str((string) param('emoji'), 8),
                 clamp_str((string) param('headline'), 160),
                 clamp_str((string) param('city'), 60),
+                $email,
                 rand_token(), $max + 10, now(),
             ]);
             json_out(['ok' => true, 'id' => (int) db()->lastInsertId()]);
@@ -370,20 +620,27 @@ try {
 
         case 'admin_save_person': {
             require_admin();
-            $id = (int) param('id', 0);
-            $st = db()->prepare(
-                'UPDATE people SET name = ?, slug = ?, emoji = ?, headline = ?, city = ?,
-                                   is_admin = ?, active = ?, sort_order = ? WHERE id = ?'
-            );
+            $id   = (int) param('id', 0);
             $name = clamp_str((string) param('name'), 120);
             if ($name === '') {
                 fail('Name required.');
             }
+            $email = clamp_str((string) param('email'), 190);
+            if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                fail('That email address does not look right.');
+            }
+            $st = db()->prepare(
+                'UPDATE people SET name = ?, slug = ?, emoji = ?, headline = ?, city = ?,
+                                   email = ?, notify = ?, is_admin = ?, active = ?,
+                                   sort_order = ? WHERE id = ?'
+            );
             $st->execute([
                 $name, slugify($name),
                 clamp_str((string) param('emoji'), 8),
                 clamp_str((string) param('headline'), 160),
                 clamp_str((string) param('city'), 60),
+                $email,
+                param('notify') ? 1 : 0,
                 param('is_admin') ? 1 : 0,
                 param('active') === false || param('active') === '0' ? 0 : 1,
                 (int) param('sort', 0),
@@ -422,6 +679,26 @@ try {
             json_out(['ok' => true]);
         }
 
+        case 'admin_set_rounds': {
+            require_admin();
+            $n = (int) param('threshold', 6);
+            $d = (int) param('days', 4);
+            $g = (int) param('digest_days', 7);
+            if ($n < 2 || $n > 50) {
+                fail('Answers needed: pick a number between 2 and 50.');
+            }
+            if ($d < 1 || $d > 60) {
+                fail('Days on the floor: pick a number between 1 and 60.');
+            }
+            if ($g < $d || $g > 90) {
+                fail('The digest has to come after it closes, and within 90 days.');
+            }
+            set_setting('round_threshold', (string) $n);
+            set_setting('round_days', (string) $d);
+            set_setting('round_digest_days', (string) $g);
+            json_out(['ok' => true, 'threshold' => $n, 'days' => $d, 'digest_days' => $g]);
+        }
+
         case 'admin_set_password': {
             require_admin();
             $pw = (string) param('password');
@@ -430,6 +707,45 @@ try {
             }
             set_setting('admin_hash', password_hash($pw, PASSWORD_DEFAULT));
             json_out(['ok' => true]);
+        }
+
+        case 'admin_email_plan': {
+            require_admin();
+            require_once __DIR__ . '/lib/emails.php';
+            json_out(['ok' => true] + plan_email_import((string) param('raw')));
+        }
+
+        case 'admin_email_apply': {
+            require_admin();
+            require_once __DIR__ . '/lib/emails.php';
+            $plan = plan_email_import((string) param('raw'));
+            $n    = apply_email_import($plan['matched']);
+            json_out(['ok' => true, 'updated' => $n]);
+        }
+
+        case 'admin_test_mail': {
+            require_admin();
+            $to = clamp_str((string) param('email'), 190);
+            if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                fail('Give a valid address to send the test to.');
+            }
+            $app  = (string) cfg('app_name');
+            $body = mail_eyebrow('Test message')
+                  . mail_p('If you are reading this, <b style="color:#e9ebf1">' . e($app)
+                      . '</b> can send email.', '#c9cedb', 14, 16)
+                  . mail_p('Spark notifications and the round digest will reach people.', '#99a0b0', 10, 14)
+                  . mail_quote('SMTP is working', mail_config()['host'] . ':' . mail_config()['port'])
+                  . mail_button('Open ' . $app, base_url());
+            [$ok, $err] = send_mail(
+                $to, '', "$app — mail is working",
+                mail_page('Your SMTP settings are correct', $body),
+                "If you are reading this, $app can send email.\n\n"
+                    . "Spark notifications and the round digest will reach people.\n\n" . base_url() . "\n"
+            );
+            if (!$ok) {
+                fail($err ?: 'Sending failed.');
+            }
+            json_out(['ok' => true, 'sent_to' => $to]);
         }
 
         case 'admin_wipe_demo': {

@@ -156,6 +156,49 @@ function render() {
       </div>
     </div>`).join('')}
 
+    <div class="sec-head"><h2>Email notifications</h2></div>
+    <div class="card">
+      ${D.mail
+        ? `<div class="row gap10"><span class="pill done">on</span>
+             <span class="small muted ellip">${esc(D.mailhost)}</span></div>
+           <p class="tiny faint mt8">People with an email address and notifications switched on get
+             a message whenever someone starts a spark with them.</p>
+           <button class="btn full mt14" data-testmail>Send a test email</button>
+           <button class="btn full mt8" data-importmail>Import addresses in bulk</button>`
+        : `<div class="row gap10"><span class="pill open">off</span>
+             <span class="small muted">No MAIL_HOST in .env</span></div>
+           <p class="tiny faint mt8">Add the MAIL_* block from <code>.env.example</code> to your
+             <code>.env</code> to switch spark notifications on.</p>`}
+      <div class="row gap10 mt14 tiny faint">
+        <span>${D.people.filter(p => p.email).length} of ${D.people.length} have an address</span>
+      </div>
+    </div>
+
+    <div class="sec-head"><h2>The Round</h2></div>
+    <div class="card">
+      <form data-roundsettings>
+        <label class="lbl">Answers before it opens up</label>
+        <input class="field" type="number" name="threshold" min="2" max="50"
+               value="${(D.rounds || {}).threshold || 6}">
+        <label class="lbl mt14">Days it holds the floor</label>
+        <input class="field" type="number" name="days" min="1" max="60"
+               value="${(D.rounds || {}).days || 4}">
+        <label class="lbl mt14">Days until the digest email</label>
+        <input class="field" type="number" name="digest_days" min="1" max="90"
+               value="${(D.rounds || {}).digest_days || 7}">
+        <p class="tiny faint mt8">Whichever comes first — enough answers, or the clock —
+          hands the floor to the next person. The digest with everyone's answers goes out later,
+          so people who were slow still get counted.</p>
+        <button class="btn full mt14">Save</button>
+      </form>
+      <div class="row gap10 mt14">
+        <span class="pill ${(D.rounds || {}).cron ? 'done' : 'open'}">${(D.rounds || {}).cron ? 'cron key set' : 'no cron key'}</span>
+        <span class="tiny faint grow">${(D.rounds || {}).cron
+          ? 'cron.php is reachable — point a daily job at it'
+          : 'Add CRON_KEY to .env, then a daily job in hPanel'}</span>
+      </div>
+    </div>
+
     <div class="sec-head"><h2>Maintenance</h2></div>
     <div class="card">
       <button class="btn full" data-pw>Change admin password</button>
@@ -177,9 +220,16 @@ function personForm(p) {
       <input class="field" name="headline" maxlength="160" value="${v('headline')}">
       <label class="lbl mt14">City</label>
       <input class="field" name="city" maxlength="60" value="${v('city')}">
+      <label class="lbl mt14">Email ${D.mail ? '' : '<span class="faint">(mail not configured)</span>'}</label>
+      <input class="field" type="email" name="email" maxlength="190" value="${v('email')}"
+        placeholder="them@example.com">
+      <p class="faint tiny mt8">Used only for spark notifications. Never shown to anyone else.</p>
       <label class="lbl mt14">Sort order</label>
       <input class="field" name="sort" type="number" value="${p ? p.sort : 999}">
       <label class="row gap10 mt14 small muted" style="cursor:pointer">
+        <input type="checkbox" name="notify" ${!p || p.notify ? 'checked' : ''}> Send them spark emails
+      </label>
+      <label class="row gap10 mt8 small muted" style="cursor:pointer">
         <input type="checkbox" name="is_admin" ${p && p.is_admin ? 'checked' : ''}> Mark as organiser
       </label>
       <label class="row gap10 mt8 small muted" style="cursor:pointer">
@@ -256,6 +306,37 @@ document.addEventListener('click', async ev => {
       </form>`);
   }
 
+  if (t.closest('[data-importmail]')) {
+    return modal(`<h3>Import addresses</h3>
+      <p class="small muted">Paste a To: line straight out of your email client —
+        <code>Name &lt;a@b.com&gt;, c@d.com</code> — or one per line. Nothing is saved
+        until you have seen what it matched.</p>
+      <form data-mailplanform class="mt20">
+        <textarea class="field" name="raw" rows="7" autofocus required
+          placeholder="Zeeshan AHMED &lt;zeeshan@example.org&gt;,&#10;someone@gmail.com,"></textarea>
+        <button class="btn primary full mt14">Show me the matches</button>
+        <button type="button" class="btn ghost full mt8" data-close>Cancel</button>
+      </form>`);
+  }
+
+  const applyBtn = t.closest('[data-mailapply]');
+  if (applyBtn) return guard(async () => {
+    const j = await api('admin_email_apply', { raw: applyBtn.dataset.mailapply });
+    close(); await load();
+    toast(`Updated ${j.updated} ${j.updated === 1 ? 'person' : 'people'}`);
+  });
+
+  if (t.closest('[data-testmail]')) {
+    return modal(`<h3>Send a test email</h3>
+      <p class="small muted">Proves the SMTP settings in your .env actually work.</p>
+      <form data-testmailform class="mt20">
+        <input class="field" type="email" name="email" autofocus required
+               placeholder="where should it go?">
+        <button class="btn primary full mt14">Send it</button>
+        <button type="button" class="btn ghost full mt8" data-close>Cancel</button>
+      </form>`);
+  }
+
   if (t.closest('[data-wipe]')) return guard(async () => {
     if (!confirm('Delete every spark and all activity? Profiles stay.')) return;
     await api('admin_wipe_demo', {});
@@ -272,7 +353,9 @@ document.addEventListener('submit', async ev => {
     ev.preventDefault();
     const payload = {
       name: val('name'), emoji: val('emoji'), headline: val('headline'), city: val('city'),
+      email: val('email'),
       sort: +val('sort') || 0,
+      notify: fd.get('notify') ? 1 : 0,
       is_admin: fd.get('is_admin') ? 1 : 0,
       active: fd.get('active') ? 1 : '0',
     };
@@ -281,6 +364,65 @@ document.addEventListener('submit', async ev => {
       if (id) await api('admin_save_person', { ...payload, id: +id });
       else    await api('admin_add_person', payload);
       close(); await load(); toast('Saved');
+    });
+  }
+
+  if (f.dataset.roundsettings !== undefined) {
+    ev.preventDefault();
+    return guard(async () => {
+      await api('admin_set_rounds', {
+        threshold: +val('threshold'), days: +val('days'), digest_days: +val('digest_days'),
+      });
+      await load(); toast('Saved');
+    });
+  }
+
+  if (f.dataset.mailplanform !== undefined) {
+    ev.preventDefault();
+    const raw = val('raw');
+    return guard(async () => {
+      const p = await api('admin_email_plan', { raw });
+      const row = (left, right, cls = '') =>
+        `<div class="row gap10 small ${cls}" style="padding:5px 0"><span class="grow ellip">${esc(left)}</span>
+         <span class="faint ellip" style="max-width:55%">${esc(right)}</span></div>`;
+
+      let body = '';
+      if (p.matched.length) {
+        body += `<div class="kt" style="--c:var(--good)">Will set (${p.matched.length})</div>`
+          + p.matched.map(m => row(m.name, m.email + (m.current && m.current !== m.email
+              ? ' — replaces ' + m.current : ''))).join('');
+      }
+      if (p.ambiguous.length) {
+        body += `<div class="kt mt14" style="--c:var(--build)">Too close to call — set by hand</div>`
+          + p.ambiguous.map(a => row(a.email, 'could be ' + (a.candidates || []).join(' / '))).join('');
+      }
+      if (p.unmatched.length) {
+        body += `<div class="kt mt14" style="--c:var(--life)">Nobody in the circle matches</div>`
+          + p.unmatched.map(u => row(u.email, u.name || 'add them first, then re-import')).join('');
+      }
+      if (p.missing.length) {
+        body += `<p class="tiny faint mt14">Still without an address: ${esc(p.missing.join(', '))}</p>`;
+      }
+
+      modal(`<h3>Check these first</h3>${body || '<p class="small muted mt14">Nothing usable in that text.</p>'}
+        ${p.matched.length
+          ? `<button class="btn primary full mt20" data-mailapply="${esc(raw)}">
+               Save ${p.matched.length} ${p.matched.length === 1 ? 'address' : 'addresses'}</button>` : ''}
+        <button class="btn ghost full mt8" data-close>Cancel</button>`);
+    });
+  }
+
+  if (f.dataset.testmailform !== undefined) {
+    ev.preventDefault();
+    const btn = f.querySelector('button');
+    btn.textContent = 'Sending…'; btn.disabled = true;
+    return guard(async () => {
+      try {
+        const j = await api('admin_test_mail', { email: val('email') });
+        close(); toast('Sent to ' + j.sent_to);
+      } finally {
+        btn.textContent = 'Send it'; btn.disabled = false;
+      }
     });
   }
 

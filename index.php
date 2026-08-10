@@ -5,6 +5,8 @@ if (!db_installed()) {
     header('Location: setup.php');
     exit;
 }
+db_sync();
+base_url();          // remembers the site address for cron.php, which has no request
 if (handle_magic_link()) {
     exit;
 }
