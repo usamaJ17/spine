@@ -52,8 +52,9 @@ try {
             // still land — just whenever somebody next opens the app.
             run_round_schedule();
 
-            $people = all_people();
-            $sum    = $me ? overlap_summary((int) $me['id']) : [];
+            $people    = all_people();
+            $feedPage  = feed_page();
+            $sum       = $me ? overlap_summary((int) $me['id']) : [];
             foreach ($people as &$p) {
                 $s = $sum[$p['id']] ?? null;
                 $p['overlap'] = $s['n'] ?? 0;
@@ -77,7 +78,8 @@ try {
                 'kinds'    => kind_meta(),
                 'stats'    => stats(),
                 'pair'     => pair_of_the_week(),
-                'feed'     => feed(25),
+                'feed'     => $feedPage['items'],
+                'feed_more' => $feedPage['more'],
                 'sparks'   => spark_rows($me ? (int) $me['id'] : null, null, 40),
                 'projects' => all_projects(),
                 'vocab'    => tag_vocabulary(),
@@ -102,8 +104,12 @@ try {
             ]);
         }
 
-        case 'feed':
-            json_out(['ok' => true, 'feed' => feed(60)]);
+        case 'feed': {
+            $limit  = min(50, max(1, (int) param('limit', FEED_PAGE)));
+            $before = (int) param('before', 0) ?: null;
+            $page   = feed_page($limit, $before);
+            json_out(['ok' => true, 'feed' => $page['items'], 'more' => $page['more']]);
+        }
 
         case 'sparks':
             json_out(['ok' => true, 'sparks' => spark_rows(null, null, 200), 'stats' => stats()]);

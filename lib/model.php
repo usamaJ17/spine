@@ -282,17 +282,37 @@ function spark_rows(?int $onlyPerson = null, ?string $status = null, int $limit 
 
 /* --------------------------------------------------------------- feed */
 
-function feed(int $limit = 40): array
+/** How many activity rows a page holds. */
+const FEED_PAGE = 10;
+
+/**
+ * One page of the feed plus whether another exists. Asks for one row more
+ * than it needs, which is cheaper than a second COUNT query.
+ */
+function feed_page(int $limit = FEED_PAGE, ?int $beforeId = null): array
 {
+    $rows = feed($limit + 1, $beforeId);
+    $more = count($rows) > $limit;
+    return ['items' => array_slice($rows, 0, $limit), 'more' => $more];
+}
+
+/**
+ * Newest first. Paged by id rather than by offset, so items that arrive while
+ * someone is reading cannot push a row onto two pages at once.
+ */
+function feed(int $limit = 40, ?int $beforeId = null): array
+{
+    $where = $beforeId !== null && $beforeId > 0 ? 'WHERE ac.id < ?' : '';
     $st = db()->prepare(
         'SELECT ac.*, a.name AS actor_name, a.emoji AS actor_emoji,
                 t.name AS target_name, t.emoji AS target_emoji
            FROM activity ac
            JOIN people a  ON a.id = ac.actor_id
       LEFT JOIN people t  ON t.id = ac.target_id
+        ' . $where . '
        ORDER BY ac.id DESC LIMIT ' . (int) $limit
     );
-    $st->execute();
+    $st->execute($where !== '' ? [$beforeId] : []);
     return array_map(function ($r) {
         return [
             'id'     => (int) $r['id'],

@@ -256,8 +256,9 @@ function viewHome() {
 
     <div class="sec-head"><h2>What's happening</h2></div>
     <div class="card">
-      ${S.feed.length ? S.feed.map(feedItem).join('')
-        : `<div class="empty"><div class="big">🌱</div>Nothing yet.<br>Be the first — add a trait to someone.</div>`}
+      <div id="feedlist">${S.feed.length ? S.feed.map(feedItem).join('')
+        : `<div class="empty"><div class="big">🌱</div>Nothing yet.<br>Be the first — add a trait to someone.</div>`}</div>
+      ${S.feed_more ? `<button class="btn ghost full mt14" data-morefeed>Show more</button>` : ''}
     </div>
 
     <a class="howlink mt20" href="#/how">
@@ -1113,6 +1114,27 @@ document.addEventListener('click', async ev => {
     window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
     return;
   }
+
+  const mf = t.closest('[data-morefeed]');
+  if (mf) return guard(async () => {
+    const last = S.feed[S.feed.length - 1];
+    mf.disabled = true;
+    mf.textContent = 'Loading…';
+    try {
+      const j = await api('feed', null, { before: last ? last.id : 0 });
+      S.feed = S.feed.concat(j.feed);
+      S.feed_more = j.more;
+      // Append rather than re-render, so the page does not jump back to the top.
+      const list = document.getElementById('feedlist');
+      if (list) list.insertAdjacentHTML('beforeend', j.feed.map(feedItem).join(''));
+      if (j.more) { mf.disabled = false; mf.textContent = 'Show more'; }
+      else { mf.remove(); }
+    } catch (e) {
+      mf.disabled = false;
+      mf.textContent = 'Show more';
+      throw e;
+    }
+  });
 
   const flt = t.closest('[data-filter]');
   if (flt) { sparkFilter = flt.dataset.filter; return render(); }
