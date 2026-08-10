@@ -58,7 +58,7 @@ p { margin: 0; }
 
 /* ------------------------------------------------------------- layout */
 
-.wrap { position: relative; z-index: 1; max-width: 880px; margin: 0 auto; padding: 0 16px 120px; }
+.wrap { position: relative; z-index: 1; max-width: 880px; margin: 0 auto; padding: 20px 16px 120px; }
 
 .topbar {
   position: sticky; top: 0; z-index: 40;
@@ -504,13 +504,30 @@ a.round:hover { border-color: rgba(255,180,84,.55); transform: translateY(-1px);
 
 /* ------------------------------------------------------ how it works */
 
+/* Deliberately the brightest thing in the bar after the brand — someone who
+   is lost should spot it without hunting. */
 .helpbtn {
-  width: 30px; height: 30px; min-width: 30px; border-radius: 50%;
-  display: grid; place-items: center; font-size: 14px; font-weight: 700;
-  color: var(--dim); border: 1px solid var(--line); background: var(--card);
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 12px; border-radius: 999px;
+  font-size: 13px; font-weight: 650; white-space: nowrap;
+  color: #ffcb8f;
+  border: 1px solid rgba(255,150,71,.42);
+  background: rgba(255,150,71,.13);
   transition: .15s;
 }
-.helpbtn:hover { color: var(--brand); border-color: rgba(255,150,71,.5); background: var(--card-2); }
+.helpbtn .q {
+  width: 17px; height: 17px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 800;
+  background: var(--brand); color: #2b1500;
+}
+.helpbtn:hover {
+  background: rgba(255,150,71,.24); border-color: rgba(255,150,71,.7); color: #ffe3bf;
+}
+/* Below the desktop breakpoint it collapses to just the badge. */
+@media (max-width: 860px) {
+  .helpbtn { padding: 0; width: 32px; justify-content: center; gap: 0; }
+  .helpbtn .lbl { display: none; }
+}
 
 .howhead { padding: 12px 2px 4px; }
 .howhead h1 { font-size: 28px; margin-bottom: 12px; }

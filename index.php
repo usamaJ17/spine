@@ -36,7 +36,7 @@ $ver = (string) max(
     <a class="brand" href="#/"><span class="brand-dot">◆</span><?= $name ?></a>
     <nav class="top-nav" id="topnav"></nav>
     <span class="top-spacer"></span>
-    <a class="helpbtn" href="#/how" title="How this works" aria-label="How this works">?</a>
+    <a class="helpbtn" href="#/how" title="How this works" aria-label="How this works"><span class="q">?</span><span class="lbl">How it works</span></a>
     <span id="mechip"></span>
   </div>
 </header>

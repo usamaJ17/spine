@@ -502,12 +502,44 @@ function viewHow() {
 
     ${step(1, 'Fix your profile', `It is already filled in from the July session — check it and
       correct whatever is wrong. Three minutes, once.`)}
-    ${step(2, 'Say what you notice in other people', `Open anyone and write one thing you saw in them.
+    ${step(2, 'Answer whatever is on the floor', `One question or idea runs at a time, from
+      someone in the circle. Answering takes a minute and is the main reason to come back.`)}
+    ${step(3, 'Say what you notice in other people', `Open anyone and write one thing you saw in them.
       It takes fifteen seconds and it is the single kindest thing on this site.`)}
-    ${step(3, 'Turn a shared topic into a spark', `The app shows you why you two should talk.
-      Tap it. That is a spark — a small, public promise that you will actually speak.`)}
-    ${step(4, 'Talk, then say what came out of it', `A voice note counts. A ten-minute call counts.
-      Afterwards mark it done and write one line about it — that line is what makes other people copy you.`)}
+    ${step(4, 'Turn a shared topic into a spark, then actually talk', `The app shows you why you two
+      should talk — tap it, and that is a spark. A voice note counts. A ten-minute call counts.
+      Afterwards write one line about how it went; that line is what makes other people copy you.`)}
+
+    <div class="sec-head"><h2>The Round</h2></div>
+    <div class="why">
+      <h3>One question at a time, and everyone answers</h3>
+      <p class="small muted mt8">Anyone can put up a question, a thought or an idea when the floor
+        is free. Everyone gets an email. Only one runs at a time, so the whole circle is thinking
+        about the same thing instead of five half-dead threads.</p>
+
+      <div class="bucket">
+        <div class="bl">You answer before you read</div>
+        <p class="small muted">You cannot see anyone else's answer until you have written your own.
+        Otherwise the first answer sets the tone and everybody just agrees with it. Write yours,
+        and the rest open up straight away.</p>
+      </div>
+
+      <div class="bucket">
+        <div class="bl">It hands the floor on by itself</div>
+        <p class="small muted">Once enough of you have answered — or after a few days, whichever
+        lands first — it moves to the archive and the next person can post. The exact count and
+        the days left are on the Round page.</p>
+      </div>
+
+      <div class="bucket">
+        <div class="bl">Late is still welcome</div>
+        <p class="small muted">Anything in the archive stays open to answer and open to read.
+        A few days after it closes, everyone gets one email with the question and every answer
+        in it — so if you were slow, you are still counted.</p>
+      </div>
+
+      <a class="btn primary full mt14" href="#/round">See what is on the floor</a>
+    </div>
 
     <div class="sec-head"><h2>Your profile has four boxes</h2></div>
     <div class="card">
@@ -546,17 +578,23 @@ function viewHow() {
         you do not have to decide anything — the week already decided. Just start.</p></div>
     </div>
 
-    <div class="sec-head"><h2>Two practical things</h2></div>
+    <div class="sec-head"><h2>Three practical things</h2></div>
     <div class="card">
       <div class="kindblock"><div class="kt" style="--c:var(--seen)">There is no password</div>
         <p class="small muted">Your personal link signs you in and this device stays signed in.
         Tap your name at the top right to switch to someone else. Keep your link to yourself —
         it is the closest thing here to a key.</p></div>
 
+      <div class="kindblock"><div class="kt" style="--c:var(--build)">We will email you, rarely</div>
+        <p class="small muted">Only when someone sparks with you, when a new question goes up,
+        and once when a question closes. Nothing else, ever. Your address is visible to nobody
+        but you — and you can change it or switch the emails off completely under
+        <b>Edit your header</b> on your own profile.</p></div>
+
       <div class="kindblock"><div class="kt" style="--c:var(--good)">Everything is public to the group</div>
-        <p class="small muted">Every trait and every spark carries the name of whoever wrote it.
-        There are no phone numbers or email addresses on this site, and it does not appear
-        on Google. Write like the person is reading — because they are.</p></div>
+        <p class="small muted">Every trait, spark and answer carries the name of whoever wrote it.
+        There are no phone numbers here, and the site does not appear on Google. Write like the
+        person is reading — because they are.</p></div>
     </div>
 
     <div class="why mt20">
@@ -567,8 +605,8 @@ function viewHow() {
       <a class="btn primary full mt14" href="#/people" data-seenhow>Pick someone</a>
     </div>
 
-    <p class="center faint tiny mt20">You can come back to this page any time — the
-      <b>?</b> at the top right.</p>
+    <p class="center faint tiny mt20">You can come back to this page any time —
+      <b>How it works</b> at the top right.</p>
   </div>`;
 }
 
